@@ -1,0 +1,1094 @@
+openapi: 3.0.3
+
+info:
+  title: Sistema de Triage y Gestión de Solicitudes Académicas — API REST
+  description: |
+    API REST del Sistema de Triage y Gestión de Solicitudes Académicas del
+    Programa de Ingeniería de Sistemas y Computación — Universidad del Quindío.
+
+    ## Hito 1 — Diseño de Contratos API (Semanas 1–5)
+
+    Este documento especifica todos los contratos de la API REST conforme a los
+    Requisitos Funcionales RF-01 al RF-13.
+
+    ## Base URL
+    - **Desarrollo:** `http://localhost:8080`
+
+    ## Autenticación
+    Autenticación básica por rol (RF-13). La autenticación JWT se implementa en el Hito 3.
+
+    ## Códigos de Respuesta Comunes
+    | Código | Significado                        |
+    |--------|------------------------------------|
+    | 200    | Éxito                              |
+    | 201    | Recurso creado                     |
+    | 400    | Solicitud inválida / validación    |
+    | 404    | Recurso no encontrado              |
+    | 409    | Conflicto (ej. transición inválida)|
+    | 500    | Error interno del servidor         |
+
+  version: "1.0.0"
+  contact:
+    name: Equipo de Desarrollo — POO
+    email: equipo@uniquindio.edu.co
+
+servers:
+  - url: http://localhost:8080
+    description: Servidor de desarrollo
+
+tags:
+  - name: Solicitudes
+    description: "RF-01 al RF-08, RF-12 — Gestión completa del ciclo de vida de solicitudes"
+  - name: Usuarios
+    description: "RF-05, RF-12, RF-13 — Gestión de usuarios y responsables"
+
+# ============================================================
+# COMPONENTES COMPARTIDOS
+# ============================================================
+components:
+
+  schemas:
+
+    # ---------- ENUMERACIONES ----------
+
+    TipoSolicitud:
+      type: string
+      description: "RF-02 — Clasificación según tipo de solicitud"
+      enum:
+        - REGISTRO_ASIGNATURAS
+        - HOMOLOGACION
+        - CANCELACION_ASIGNATURAS
+        - SOLICITUD_CUPOS
+        - CONSULTA_ACADEMICA
+      example: HOMOLOGACION
+
+    EstadoSolicitud:
+      type: string
+      description: "RF-04 — Estado dentro del ciclo de vida"
+      enum:
+        - REGISTRADA
+        - CLASIFICADA
+        - EN_ATENCION
+        - ATENDIDA
+        - CERRADA
+      example: REGISTRADA
+
+    Prioridad:
+      type: string
+      description: "RF-03 — Nivel de prioridad de la solicitud"
+      enum:
+        - BAJA
+        - MEDIA
+        - ALTA
+        - CRITICA
+      example: ALTA
+
+    Rol:
+      type: string
+      description: "RF-13 — Rol del usuario en el sistema"
+      enum:
+        - ESTUDIANTE
+        - DOCENTE
+        - ADMINISTRATIVO
+        - RESPONSABLE
+      example: ESTUDIANTE
+
+    CanalOrigen:
+      type: string
+      description: "RF-01 — Canal por el que ingresó la solicitud"
+      enum:
+        - CSU
+        - CORREO
+        - SAC
+        - TELEFONICO
+        - PRESENCIAL
+      example: CORREO
+
+    # ---------- REQUEST DTOs ----------
+
+    SolicitudRequestDTO:
+      type: object
+      description: "RF-01 — Datos para registrar una nueva solicitud académica"
+      required:
+        - descripcion
+        - canalOrigen
+        - solicitanteId
+      properties:
+        descripcion:
+          type: string
+          description: Descripción detallada de la solicitud
+          minLength: 10
+          maxLength: 2000
+          example: "Solicito homologación de la asignatura Cálculo I cursada en la Universidad Nacional"
+        canalOrigen:
+          $ref: '#/components/schemas/CanalOrigen'
+        solicitanteId:
+          type: integer
+          format: int64
+          description: ID del usuario que realiza la solicitud
+          example: 1
+        fechaLimite:
+          type: string
+          format: date
+          description: "RF-03 — Fecha límite opcional para la atención (influye en priorización)"
+          example: "2026-03-15"
+
+    ClasificacionRequestDTO:
+      type: object
+      description: "RF-02, RF-03 — Datos para clasificar y priorizar una solicitud"
+      required:
+        - tipoSolicitud
+        - usuarioResponsableId
+      properties:
+        tipoSolicitud:
+          $ref: '#/components/schemas/TipoSolicitud'
+        usuarioResponsableId:
+          type: integer
+          format: int64
+          description: ID del usuario que realiza la clasificación
+          example: 2
+
+    PriorizacionRequestDTO:
+      type: object
+      description: "RF-03 — Ajuste manual de prioridad con justificación obligatoria"
+      required:
+        - prioridad
+        - justificacion
+        - usuarioResponsableId
+      properties:
+        prioridad:
+          $ref: '#/components/schemas/Prioridad'
+        justificacion:
+          type: string
+          description: Justificación obligatoria de la prioridad asignada
+          minLength: 10
+          maxLength: 500
+          example: "Solicitud crítica por fecha de cierre de matrícula inminente"
+        usuarioResponsableId:
+          type: integer
+          format: int64
+          description: ID del usuario que realiza la priorización
+          example: 2
+
+    CambioEstadoRequestDTO:
+      type: object
+      description: "RF-04 — Cambio de estado con validación de transición"
+      required:
+        - nuevoEstado
+        - usuarioResponsableId
+      properties:
+        nuevoEstado:
+          $ref: '#/components/schemas/EstadoSolicitud'
+        observaciones:
+          type: string
+          description: Observaciones opcionales del cambio de estado
+          maxLength: 1000
+          example: "La solicitud ha sido revisada y procesada satisfactoriamente"
+        usuarioResponsableId:
+          type: integer
+          format: int64
+          description: ID del usuario que realiza el cambio
+          example: 2
+
+    AsignacionRequestDTO:
+      type: object
+      description: "RF-05 — Asignación de responsable activo a una solicitud"
+      required:
+        - responsableId
+        - usuarioResponsableId
+      properties:
+        responsableId:
+          type: integer
+          format: int64
+          description: ID del responsable activo a asignar
+          example: 3
+        usuarioResponsableId:
+          type: integer
+          format: int64
+          description: ID del usuario que realiza la asignación
+          example: 2
+        observaciones:
+          type: string
+          description: Observaciones opcionales de la asignación
+          maxLength: 500
+          example: "Asignado al Dr. García por especialidad en homologaciones"
+
+    CierreRequestDTO:
+      type: object
+      description: "RF-08 — Cierre formal de una solicitud atendida"
+      required:
+        - observacionCierre
+        - usuarioResponsableId
+      properties:
+        observacionCierre:
+          type: string
+          description: Observación obligatoria de cierre (solicitud cerrará inmutablemente)
+          minLength: 10
+          maxLength: 1000
+          example: "Homologación aprobada. Resolución N° 2026-045 firmada por el director de programa."
+        usuarioResponsableId:
+          type: integer
+          format: int64
+          description: ID del usuario que realiza el cierre
+          example: 2
+
+    UsuarioRequestDTO:
+      type: object
+      description: "RF-05, RF-13 — Datos para registrar un nuevo usuario"
+      required:
+        - identificacion
+        - nombre
+        - apellido
+        - email
+        - rol
+      properties:
+        identificacion:
+          type: string
+          description: Número de identificación único
+          maxLength: 20
+          example: "1094123456"
+        nombre:
+          type: string
+          maxLength: 100
+          example: "Juan"
+        apellido:
+          type: string
+          maxLength: 100
+          example: "García"
+        email:
+          type: string
+          format: email
+          maxLength: 150
+          example: "juan.garcia@uniquindio.edu.co"
+        rol:
+          $ref: '#/components/schemas/Rol'
+        password:
+          type: string
+          description: Contraseña (opcional en Hito 1, requerida en Hito 3)
+          maxLength: 255
+          example: "password123"
+
+    # ---------- RESPONSE DTOs ----------
+
+    UsuarioResponseDTO:
+      type: object
+      description: Representación de un usuario en respuesta de API
+      properties:
+        id:
+          type: integer
+          format: int64
+          example: 1
+        identificacion:
+          type: string
+          example: "1094123456"
+        nombre:
+          type: string
+          example: "Juan"
+        apellido:
+          type: string
+          example: "García"
+        nombreCompleto:
+          type: string
+          example: "Juan García"
+        email:
+          type: string
+          example: "juan.garcia@uniquindio.edu.co"
+        rol:
+          $ref: '#/components/schemas/Rol'
+        activo:
+          type: boolean
+          example: true
+
+    HistorialResponseDTO:
+      type: object
+      description: "RF-06 — Entrada del historial auditable de una solicitud"
+      properties:
+        id:
+          type: integer
+          format: int64
+          example: 1
+        fechaHora:
+          type: string
+          format: date-time
+          example: "2026-02-23T10:30:00"
+        accion:
+          type: string
+          example: "Solicitud clasificada como HOMOLOGACION con prioridad ALTA"
+        usuario:
+          $ref: '#/components/schemas/UsuarioResponseDTO'
+        observaciones:
+          type: string
+          example: "Clasificada por el coordinador académico"
+
+    SolicitudResponseDTO:
+      type: object
+      description: Representación completa de una solicitud con su historial
+      properties:
+        id:
+          type: integer
+          format: int64
+          example: 1
+        tipoSolicitud:
+          $ref: '#/components/schemas/TipoSolicitud'
+        descripcion:
+          type: string
+          example: "Solicito homologación de Cálculo I"
+        canalOrigen:
+          $ref: '#/components/schemas/CanalOrigen'
+        fechaRegistro:
+          type: string
+          format: date-time
+          example: "2026-02-23T09:00:00"
+        solicitante:
+          $ref: '#/components/schemas/UsuarioResponseDTO'
+        estado:
+          $ref: '#/components/schemas/EstadoSolicitud'
+        prioridad:
+          $ref: '#/components/schemas/Prioridad'
+        justificacionPrioridad:
+          type: string
+          example: "Fecha de cierre de período próxima"
+        responsable:
+          $ref: '#/components/schemas/UsuarioResponseDTO'
+          nullable: true
+        fechaLimite:
+          type: string
+          format: date
+          example: "2026-03-15"
+          nullable: true
+        observacionCierre:
+          type: string
+          example: "Homologación aprobada."
+          nullable: true
+        historial:
+          type: array
+          items:
+            $ref: '#/components/schemas/HistorialResponseDTO'
+          description: "RF-06 — Historial auditable completo"
+
+    ApiResponseDTO:
+      type: object
+      description: Envoltorio estándar de todas las respuestas de la API
+      properties:
+        exitoso:
+          type: boolean
+          description: Indica si la operación fue exitosa
+          example: true
+        mensaje:
+          type: string
+          description: Mensaje descriptivo de la operación
+          example: "Solicitud registrada exitosamente"
+        datos:
+          description: Datos de la respuesta (puede ser objeto o array)
+
+    ErrorResponseDTO:
+      type: object
+      description: Representación estándar de un error
+      properties:
+        exitoso:
+          type: boolean
+          example: false
+        mensaje:
+          type: string
+          example: "Transición de estado inválida: CERRADA no puede transicionar a ningún estado"
+        datos:
+          type: object
+          nullable: true
+
+  # ---------- RESPUESTAS REUTILIZABLES ----------
+
+  responses:
+    NotFound:
+      description: Recurso no encontrado
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponseDTO'
+          example:
+            exitoso: false
+            mensaje: "Solicitud con ID 99 no encontrada"
+            datos: null
+
+    BadRequest:
+      description: Datos de entrada inválidos o validación fallida
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponseDTO'
+          example:
+            exitoso: false
+            mensaje: "La descripción no puede estar vacía"
+            datos: null
+
+    Conflict:
+      description: Conflicto de negocio (ej. transición de estado inválida)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponseDTO'
+          example:
+            exitoso: false
+            mensaje: "Transición inválida: la solicitud está en estado CERRADA"
+            datos: null
+
+# ============================================================
+# PATHS — SOLICITUDES
+# ============================================================
+paths:
+
+  /api/solicitudes:
+    post:
+      tags: [Solicitudes]
+      summary: "RF-01 — Registrar nueva solicitud académica"
+      description: |
+        Registra una nueva solicitud académica en el sistema.
+        - Almacena tipo, descripción, canal de origen, fecha/hora y solicitante.
+        - El estado inicial es automáticamente **REGISTRADA**.
+        - Se genera la primera entrada en el historial.
+      operationId: registrarSolicitud
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SolicitudRequestDTO'
+            example:
+              descripcion: "Solicito homologación de la asignatura Cálculo I"
+              canalOrigen: CORREO
+              solicitanteId: 1
+              fechaLimite: "2026-03-15"
+      responses:
+        '201':
+          description: Solicitud registrada exitosamente
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponseDTO'
+                  - type: object
+                    properties:
+                      datos:
+                        $ref: '#/components/schemas/SolicitudResponseDTO'
+              example:
+                exitoso: true
+                mensaje: "Solicitud registrada exitosamente"
+                datos:
+                  id: 1
+                  descripcion: "Solicito homologación de la asignatura Cálculo I"
+                  canalOrigen: CORREO
+                  fechaRegistro: "2026-02-23T09:00:00"
+                  estado: REGISTRADA
+                  solicitante:
+                    id: 1
+                    nombre: "Juan"
+                    apellido: "García"
+                    email: "juan.garcia@uniquindio.edu.co"
+                    rol: ESTUDIANTE
+                    activo: true
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    get:
+      tags: [Solicitudes]
+      summary: "RF-07 — Consultar solicitudes con filtros opcionales"
+      description: |
+        Retorna la lista de solicitudes. Soporta filtros opcionales por:
+        - `estado`: Estado actual de la solicitud
+        - `tipo`: Tipo de solicitud
+        - `prioridad`: Nivel de prioridad
+        - `responsableId`: ID del responsable asignado
+
+        Si no se especifica ningún filtro, retorna **todas** las solicitudes.
+      operationId: consultarSolicitudes
+      parameters:
+        - name: estado
+          in: query
+          required: false
+          schema:
+            $ref: '#/components/schemas/EstadoSolicitud'
+          description: "RF-07 — Filtrar por estado de la solicitud"
+          example: REGISTRADA
+        - name: tipo
+          in: query
+          required: false
+          schema:
+            $ref: '#/components/schemas/TipoSolicitud'
+          description: "RF-07 — Filtrar por tipo de solicitud"
+        - name: prioridad
+          in: query
+          required: false
+          schema:
+            $ref: '#/components/schemas/Prioridad'
+          description: "RF-07 — Filtrar por nivel de prioridad"
+        - name: responsableId
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: int64
+          description: "RF-07 — Filtrar por ID del responsable asignado"
+      responses:
+        '200':
+          description: Lista de solicitudes obtenida exitosamente
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponseDTO'
+                  - type: object
+                    properties:
+                      datos:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/SolicitudResponseDTO'
+              example:
+                exitoso: true
+                mensaje: "Se encontraron 3 solicitudes"
+                datos: []
+
+  /api/solicitudes/{id}:
+    get:
+      tags: [Solicitudes]
+      summary: "RF-06, RF-07 — Obtener solicitud por ID con historial completo"
+      description: |
+        Retorna el detalle completo de una solicitud incluyendo su historial auditable (RF-06).
+      operationId: obtenerSolicitud
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+          description: ID único de la solicitud
+          example: 1
+      responses:
+        '200':
+          description: Solicitud encontrada con historial
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponseDTO'
+                  - type: object
+                    properties:
+                      datos:
+                        $ref: '#/components/schemas/SolicitudResponseDTO'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/solicitudes/{id}/clasificar:
+    put:
+      tags: [Solicitudes]
+      summary: "RF-02, RF-03 — Clasificar solicitud (asignar tipo y prioridad)"
+      description: |
+        Clasifica una solicitud asignando su `TipoSolicitud`.
+        - Cambia el estado de **REGISTRADA → CLASIFICADA** (RF-04).
+        - La prioridad se calcula automáticamente según el tipo, impacto académico y fecha límite (RF-03).
+        - Registra la acción en el historial (RF-06).
+
+        **Precondición:** La solicitud debe estar en estado `REGISTRADA`.
+      operationId: clasificarSolicitud
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+          example: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ClasificacionRequestDTO'
+            example:
+              tipoSolicitud: HOMOLOGACION
+              usuarioResponsableId: 2
+      responses:
+        '200':
+          description: Solicitud clasificada exitosamente
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponseDTO'
+                  - type: object
+                    properties:
+                      datos:
+                        $ref: '#/components/schemas/SolicitudResponseDTO'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /api/solicitudes/{id}/priorizar:
+    put:
+      tags: [Solicitudes]
+      summary: "RF-03 — Ajustar manualmente la prioridad de una solicitud"
+      description: |
+        Permite ajustar manualmente la prioridad de una solicitud.
+        - La justificación es **obligatoria**.
+        - Registra la acción en el historial (RF-06).
+      operationId: priorizarSolicitud
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+          example: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PriorizacionRequestDTO'
+            example:
+              prioridad: CRITICA
+              justificacion: "Cierre de período en 3 días, impacto directo en matrícula del estudiante"
+              usuarioResponsableId: 2
+      responses:
+        '200':
+          description: Prioridad actualizada exitosamente
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponseDTO'
+                  - type: object
+                    properties:
+                      datos:
+                        $ref: '#/components/schemas/SolicitudResponseDTO'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/solicitudes/{id}/estado:
+    put:
+      tags: [Solicitudes]
+      summary: "RF-04 — Cambiar estado de la solicitud (transición validada)"
+      description: |
+        Cambia el estado de una solicitud validando que la transición sea coherente (RF-04).
+
+        **Transiciones válidas:**
+        - `REGISTRADA → CLASIFICADA`
+        - `CLASIFICADA → EN_ATENCION`
+        - `EN_ATENCION → ATENDIDA`
+        - `ATENDIDA → CERRADA`
+
+        Cualquier otra transición será rechazada con **409 Conflict**.
+      operationId: cambiarEstado
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+          example: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CambioEstadoRequestDTO'
+            example:
+              nuevoEstado: ATENDIDA
+              observaciones: "Solicitud procesada satisfactoriamente"
+              usuarioResponsableId: 2
+      responses:
+        '200':
+          description: Estado actualizado exitosamente
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponseDTO'
+                  - type: object
+                    properties:
+                      datos:
+                        $ref: '#/components/schemas/SolicitudResponseDTO'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /api/solicitudes/{id}/asignar:
+    put:
+      tags: [Solicitudes]
+      summary: "RF-05 — Asignar responsable activo a una solicitud"
+      description: |
+        Asigna un responsable activo a una solicitud.
+        - El responsable **debe estar activo** (`activo = true`).
+        - La asignación queda registrada en el historial (RF-06).
+        - Cambia el estado a **EN_ATENCION**.
+      operationId: asignarResponsable
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+          example: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AsignacionRequestDTO'
+            example:
+              responsableId: 3
+              usuarioResponsableId: 2
+              observaciones: "Asignado al Dr. Martínez por especialidad en homologaciones"
+      responses:
+        '200':
+          description: Responsable asignado exitosamente
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponseDTO'
+                  - type: object
+                    properties:
+                      datos:
+                        $ref: '#/components/schemas/SolicitudResponseDTO'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /api/solicitudes/{id}/cerrar:
+    put:
+      tags: [Solicitudes]
+      summary: "RF-08 — Cerrar formalmente una solicitud atendida"
+      description: |
+        Cierra una solicitud con observación obligatoria.
+
+        **Precondiciones (RF-08):**
+        - La solicitud debe estar en estado `ATENDIDA`.
+        - La `observacionCierre` es **obligatoria** y no puede estar vacía.
+        - Una vez cerrada, la solicitud es **inmutable**: no puede ser modificada.
+      operationId: cerrarSolicitud
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+          example: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CierreRequestDTO'
+            example:
+              observacionCierre: "Homologación aprobada. Resolución firmada por el director de programa."
+              usuarioResponsableId: 2
+      responses:
+        '200':
+          description: Solicitud cerrada exitosamente
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponseDTO'
+                  - type: object
+                    properties:
+                      datos:
+                        $ref: '#/components/schemas/SolicitudResponseDTO'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /api/solicitudes/estado/{estado}:
+    get:
+      tags: [Solicitudes]
+      summary: "RF-07 — Consultar solicitudes por estado específico"
+      operationId: consultarPorEstado
+      parameters:
+        - name: estado
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/EstadoSolicitud'
+          example: REGISTRADA
+      responses:
+        '200':
+          description: Solicitudes en el estado indicado
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponseDTO'
+                  - type: object
+                    properties:
+                      datos:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/SolicitudResponseDTO'
+
+  /api/solicitudes/solicitante/{solicitanteId}:
+    get:
+      tags: [Solicitudes]
+      summary: "RF-07 — Consultar solicitudes de un solicitante"
+      operationId: consultarPorSolicitante
+      parameters:
+        - name: solicitanteId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+          example: 1
+      responses:
+        '200':
+          description: Solicitudes del solicitante
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponseDTO'
+                  - type: object
+                    properties:
+                      datos:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/SolicitudResponseDTO'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/solicitudes/responsable/{responsableId}:
+    get:
+      tags: [Solicitudes]
+      summary: "RF-07 — Consultar solicitudes asignadas a un responsable"
+      operationId: consultarPorResponsable
+      parameters:
+        - name: responsableId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+          example: 3
+      responses:
+        '200':
+          description: Solicitudes del responsable
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponseDTO'
+                  - type: object
+                    properties:
+                      datos:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/SolicitudResponseDTO'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+# ============================================================
+# PATHS — USUARIOS
+# ============================================================
+
+  /api/usuarios:
+    post:
+      tags: [Usuarios]
+      summary: "RF-05, RF-13 — Registrar nuevo usuario"
+      operationId: registrarUsuario
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UsuarioRequestDTO'
+            example:
+              identificacion: "1094123456"
+              nombre: "Juan"
+              apellido: "García"
+              email: "juan.garcia@uniquindio.edu.co"
+              rol: ESTUDIANTE
+      responses:
+        '201':
+          description: Usuario registrado exitosamente
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponseDTO'
+                  - type: object
+                    properties:
+                      datos:
+                        $ref: '#/components/schemas/UsuarioResponseDTO'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+    get:
+      tags: [Usuarios]
+      summary: "RF-13 — Obtener todos los usuarios"
+      operationId: obtenerTodosUsuarios
+      responses:
+        '200':
+          description: Lista de usuarios
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponseDTO'
+                  - type: object
+                    properties:
+                      datos:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/UsuarioResponseDTO'
+
+  /api/usuarios/{id}:
+    get:
+      tags: [Usuarios]
+      summary: Obtener usuario por ID
+      operationId: obtenerUsuario
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+          example: 1
+      responses:
+        '200':
+          description: Usuario encontrado
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponseDTO'
+                  - type: object
+                    properties:
+                      datos:
+                        $ref: '#/components/schemas/UsuarioResponseDTO'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/usuarios/rol/{rol}:
+    get:
+      tags: [Usuarios]
+      summary: "RF-13 — Obtener usuarios por rol"
+      operationId: obtenerUsuariosPorRol
+      parameters:
+        - name: rol
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/Rol'
+          example: RESPONSABLE
+      responses:
+        '200':
+          description: Usuarios con el rol especificado
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponseDTO'
+                  - type: object
+                    properties:
+                      datos:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/UsuarioResponseDTO'
+
+  /api/usuarios/responsables-activos:
+    get:
+      tags: [Usuarios]
+      summary: "RF-05 — Listar responsables activos disponibles para asignación"
+      description: Retorna todos los usuarios con rol RESPONSABLE y activo = true.
+      operationId: obtenerResponsablesActivos
+      responses:
+        '200':
+          description: Lista de responsables activos
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponseDTO'
+                  - type: object
+                    properties:
+                      datos:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/UsuarioResponseDTO'
+
+  /api/usuarios/{id}/desactivar:
+    put:
+      tags: [Usuarios]
+      summary: "RF-05 — Desactivar un usuario"
+      description: Desactiva un usuario. Un usuario desactivado no puede ser asignado como responsable.
+      operationId: desactivarUsuario
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+          example: 3
+      responses:
+        '200':
+          description: Usuario desactivado
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponseDTO'
+                  - type: object
+                    properties:
+                      datos:
+                        $ref: '#/components/schemas/UsuarioResponseDTO'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/usuarios/{id}/activar:
+    put:
+      tags: [Usuarios]
+      summary: "RF-05 — Activar un usuario"
+      operationId: activarUsuario
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+          example: 3
+      responses:
+        '200':
+          description: Usuario activado
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponseDTO'
+                  - type: object
+                    properties:
+                      datos:
+                        $ref: '#/components/schemas/UsuarioResponseDTO'
+        '404':
+          $ref: '#/components/responses/NotFound'
