@@ -17,6 +17,12 @@ info:
     ## Autenticación
     Autenticación básica por rol (RF-13). La autenticación JWT se implementa en el Hito 3.
 
+    ## Seguridad — Identidad del Actor
+    El usuario que ejecuta cada acción transaccional (clasificar, priorizar, cambiar estado,
+    asignar, cerrar) es extraído del **contexto de seguridad del servidor** (sesión/token).
+    Ningún endpoint acepta `usuarioResponsableId` en el body del request; enviarlo
+    constituye un hueco de seguridad que permitiría suplantar la identidad de otro usuario.
+
     ## Códigos de Respuesta Comunes
     | Código | Significado                        |
     |--------|------------------------------------|
@@ -41,6 +47,8 @@ tags:
     description: "RF-01 al RF-08, RF-12 — Gestión completa del ciclo de vida de solicitudes"
   - name: Usuarios
     description: "RF-05, RF-12, RF-13 — Gestión de usuarios y responsables"
+  - name: Inteligencia Artificial
+    description: "RF-09, RF-10 — Asistencia de IA: sugerencias de respuesta y clasificación automática mediante LLM"
 
 # ============================================================
 # COMPONENTES COMPARTIDOS
@@ -135,26 +143,23 @@ components:
 
     ClasificacionRequestDTO:
       type: object
-      description: "RF-02, RF-03 — Datos para clasificar y priorizar una solicitud"
+      description: |
+        RF-02, RF-03 — Datos para clasificar y priorizar una solicitud.
+        El usuario que ejecuta la clasificación es extraído del contexto de seguridad del servidor.
       required:
         - tipoSolicitud
-        - usuarioResponsableId
       properties:
         tipoSolicitud:
           $ref: '#/components/schemas/TipoSolicitud'
-        usuarioResponsableId:
-          type: integer
-          format: int64
-          description: ID del usuario que realiza la clasificación
-          example: 2
 
     PriorizacionRequestDTO:
       type: object
-      description: "RF-03 — Ajuste manual de prioridad con justificación obligatoria"
+      description: |
+        RF-03 — Ajuste manual de prioridad con justificación obligatoria.
+        El usuario que ejecuta la priorización es extraído del contexto de seguridad del servidor.
       required:
         - prioridad
         - justificacion
-        - usuarioResponsableId
       properties:
         prioridad:
           $ref: '#/components/schemas/Prioridad'
@@ -164,18 +169,14 @@ components:
           minLength: 10
           maxLength: 500
           example: "Solicitud crítica por fecha de cierre de matrícula inminente"
-        usuarioResponsableId:
-          type: integer
-          format: int64
-          description: ID del usuario que realiza la priorización
-          example: 2
 
     CambioEstadoRequestDTO:
       type: object
-      description: "RF-04 — Cambio de estado con validación de transición"
+      description: |
+        RF-04 — Cambio de estado con validación de transición.
+        El usuario que ejecuta el cambio es extraído del contexto de seguridad del servidor.
       required:
         - nuevoEstado
-        - usuarioResponsableId
       properties:
         nuevoEstado:
           $ref: '#/components/schemas/EstadoSolicitud'
@@ -184,29 +185,20 @@ components:
           description: Observaciones opcionales del cambio de estado
           maxLength: 1000
           example: "La solicitud ha sido revisada y procesada satisfactoriamente"
-        usuarioResponsableId:
-          type: integer
-          format: int64
-          description: ID del usuario que realiza el cambio
-          example: 2
 
     AsignacionRequestDTO:
       type: object
-      description: "RF-05 — Asignación de responsable activo a una solicitud"
+      description: |
+        RF-05 — Asignación de responsable activo a una solicitud.
+        El usuario que ejecuta la asignación es extraído del contexto de seguridad del servidor.
       required:
         - responsableId
-        - usuarioResponsableId
       properties:
         responsableId:
           type: integer
           format: int64
           description: ID del responsable activo a asignar
           example: 3
-        usuarioResponsableId:
-          type: integer
-          format: int64
-          description: ID del usuario que realiza la asignación
-          example: 2
         observaciones:
           type: string
           description: Observaciones opcionales de la asignación
@@ -215,10 +207,11 @@ components:
 
     CierreRequestDTO:
       type: object
-      description: "RF-08 — Cierre formal de una solicitud atendida"
+      description: |
+        RF-08 — Cierre formal de una solicitud atendida.
+        El usuario responsable del cierre es extraído del contexto de seguridad del servidor.
       required:
         - observacionCierre
-        - usuarioResponsableId
       properties:
         observacionCierre:
           type: string
@@ -226,11 +219,6 @@ components:
           minLength: 10
           maxLength: 1000
           example: "Homologación aprobada. Resolución N° 2026-045 firmada por el director de programa."
-        usuarioResponsableId:
-          type: integer
-          format: int64
-          description: ID del usuario que realiza el cierre
-          example: 2
 
     UsuarioRequestDTO:
       type: object
@@ -395,6 +383,53 @@ components:
           type: object
           nullable: true
 
+    # ---------- IA / LLM (RF-09, RF-10) ----------
+
+    SugerenciaIARequestDTO:
+      type: object
+      description: "RF-09 — Parámetros opcionales para solicitar sugerencias de IA sobre una solicitud"
+      properties:
+        contextoAdicional:
+          type: string
+          description: |
+            Contexto adicional que el administrativo desea incluir al consultar la IA
+            (ej. políticas vigentes, historial relevante del estudiante).
+          maxLength: 1000
+          example: "El estudiante cursó la asignatura en otra institución acreditada."
+
+    SugerenciaIAResponseDTO:
+      type: object
+      description: "RF-09, RF-10 — Respuesta de asistencia generada por el LLM"
+      properties:
+        solicitudId:
+          type: integer
+          format: int64
+          description: ID de la solicitud analizada
+          example: 1
+        sugerenciaRespuesta:
+          type: string
+          description: Borrador de respuesta sugerido por el LLM para el responsable
+          example: "Estimado estudiante, su solicitud de homologación ha sido revisada. Debe adjuntar el certificado de notas y el contenido programático de la asignatura cursada para continuar el proceso."
+        tipoSolicitudSugerido:
+          $ref: '#/components/schemas/TipoSolicitud'
+          description: "RF-10 — Clasificación de tipo sugerida por la IA"
+        prioridadSugerida:
+          $ref: '#/components/schemas/Prioridad'
+          description: Nivel de prioridad sugerido por la IA según el análisis semántico
+        justificacionIA:
+          type: string
+          description: Explicación del razonamiento del modelo para sus sugerencias
+          example: "La descripción menciona una fecha de cierre de período inminente, lo que eleva la urgencia a ALTA."
+        modeloUtilizado:
+          type: string
+          description: Identificador del modelo LLM utilizado
+          example: "gpt-4o-mini"
+        generadoEn:
+          type: string
+          format: date-time
+          description: Fecha y hora de generación de la sugerencia
+          example: "2026-02-23T10:30:00"
+
   # ---------- RESPUESTAS REUTILIZABLES ----------
 
   responses:
@@ -431,9 +466,9 @@ components:
             mensaje: "Transición inválida: la solicitud está en estado CERRADA"
             datos: null
 
-# ===================
+# ============================================================
 # PATHS — SOLICITUDES
-# ===================
+# ============================================================
 paths:
 
   /api/solicitudes:
@@ -607,7 +642,6 @@ paths:
               $ref: '#/components/schemas/ClasificacionRequestDTO'
             example:
               tipoSolicitud: HOMOLOGACION
-              usuarioResponsableId: 2
       responses:
         '200':
           description: Solicitud clasificada exitosamente
@@ -653,7 +687,6 @@ paths:
             example:
               prioridad: CRITICA
               justificacion: "Cierre de período en 3 días, impacto directo en matrícula del estudiante"
-              usuarioResponsableId: 2
       responses:
         '200':
           description: Prioridad actualizada exitosamente
@@ -703,7 +736,6 @@ paths:
             example:
               nuevoEstado: ATENDIDA
               observaciones: "Solicitud procesada satisfactoriamente"
-              usuarioResponsableId: 2
       responses:
         '200':
           description: Estado actualizado exitosamente
@@ -749,7 +781,6 @@ paths:
               $ref: '#/components/schemas/AsignacionRequestDTO'
             example:
               responsableId: 3
-              usuarioResponsableId: 2
               observaciones: "Asignado al Dr. Martínez por especialidad en homologaciones"
       responses:
         '200':
@@ -798,7 +829,6 @@ paths:
               $ref: '#/components/schemas/CierreRequestDTO'
             example:
               observacionCierre: "Homologación aprobada. Resolución firmada por el director de programa."
-              usuarioResponsableId: 2
       responses:
         '200':
           description: Solicitud cerrada exitosamente
@@ -905,9 +935,9 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
-# ================
-# PATHS — USUARIOS
-# ================
+  # ============================================================
+  # PATHS — USUARIOS
+  # ============================================================
 
   /api/usuarios:
     post:
@@ -1092,3 +1122,130 @@ paths:
                         $ref: '#/components/schemas/UsuarioResponseDTO'
         '404':
           $ref: '#/components/responses/NotFound'
+
+  # ============================================================
+  # PATHS — INTELIGENCIA ARTIFICIAL (RF-09, RF-10)
+  # ============================================================
+
+  /api/ia/solicitudes/{id}/sugerencia:
+    post:
+      tags: [Inteligencia Artificial]
+      summary: "RF-09, RF-10 — Obtener sugerencia de IA para una solicitud"
+      description: |
+        Consulta el LLM para obtener asistencia inteligente sobre una solicitud académica (RF-09, RF-10).
+        El backend envía al modelo la descripción de la solicitud, su historial y contexto académico
+        para generar:
+        - Un **borrador de respuesta** que el responsable puede revisar, editar y enviar al solicitante (RF-09).
+        - Una **clasificación y prioridad sugeridas** basadas en el análisis semántico del texto (RF-10).
+
+        **Nota de seguridad:** La sugerencia es de apoyo a la decisión humana; nunca altera el estado
+        de la solicitud ni ejecuta acciones por sí misma. El actor que llama este endpoint es
+        extraído del contexto de seguridad del servidor.
+      operationId: obtenerSugerenciaIA
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+          description: ID de la solicitud académica a analizar
+          example: 1
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SugerenciaIARequestDTO'
+            example:
+              contextoAdicional: "El estudiante cursó la asignatura en institución acreditada por el CNA."
+      responses:
+        '200':
+          description: Sugerencia de IA generada exitosamente
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponseDTO'
+                  - type: object
+                    properties:
+                      datos:
+                        $ref: '#/components/schemas/SugerenciaIAResponseDTO'
+              example:
+                exitoso: true
+                mensaje: "Sugerencia de IA generada exitosamente"
+                datos:
+                  solicitudId: 1
+                  sugerenciaRespuesta: "Estimado estudiante, para procesar su solicitud de homologación debe adjuntar el certificado de notas oficial y el contenido programático detallado de la asignatura cursada."
+                  tipoSolicitudSugerido: HOMOLOGACION
+                  prioridadSugerida: ALTA
+                  justificacionIA: "La descripción menciona homologación con fecha de cierre próxima, lo que justifica prioridad ALTA."
+                  modeloUtilizado: "gpt-4o-mini"
+                  generadoEn: "2026-02-23T10:30:00"
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          description: Error al consultar el servicio de IA (LLM no disponible)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseDTO'
+              example:
+                exitoso: false
+                mensaje: "El servicio de IA no está disponible en este momento. Intente más tarde."
+                datos: null
+
+  /api/ia/solicitudes/{id}/clasificacion-sugerida:
+    get:
+      tags: [Inteligencia Artificial]
+      summary: "RF-10 — Obtener clasificación automática sugerida por IA"
+      description: |
+        Solicita al LLM que analice la descripción de la solicitud y devuelva únicamente
+        la **clasificación y prioridad sugeridas**, sin borrador de respuesta.
+
+        Útil para asistir al coordinador durante la etapa de clasificación masiva de solicitudes (RF-02, RF-10).
+        El resultado es de carácter orientativo; la clasificación final siempre es confirmada por un humano.
+      operationId: obtenerClasificacionSugerida
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+          description: ID de la solicitud académica a analizar
+          example: 1
+      responses:
+        '200':
+          description: Clasificación sugerida por IA obtenida exitosamente
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponseDTO'
+                  - type: object
+                    properties:
+                      datos:
+                        $ref: '#/components/schemas/SugerenciaIAResponseDTO'
+              example:
+                exitoso: true
+                mensaje: "Clasificación sugerida por IA obtenida exitosamente"
+                datos:
+                  solicitudId: 1
+                  tipoSolicitudSugerido: HOMOLOGACION
+                  prioridadSugerida: ALTA
+                  justificacionIA: "Palabras clave detectadas: homologación, institución externa, cierre de período."
+                  modeloUtilizado: "gpt-4o-mini"
+                  generadoEn: "2026-02-23T10:35:00"
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          description: Error al consultar el servicio de IA (LLM no disponible)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseDTO'
+              example:
+                exitoso: false
+                mensaje: "El servicio de IA no está disponible en este momento. Intente más tarde."
+                datos: null
